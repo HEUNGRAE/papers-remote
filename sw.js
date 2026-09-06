@@ -1,5 +1,5 @@
 /* Paper Studio Remote SW — 앱셸 precache + 데이터 runtime cache */
-const SHELL_CACHE = 'psr-shell-v4';
+const SHELL_CACHE = 'psr-shell-v5';
 const DATA_CACHE = 'psr-data-v1';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'graph.js',
   'vendor/three.min.js', 'vendor/OrbitControls.js',

@@ -212,6 +212,13 @@
       labelWrap.appendChild(el);
       return { el, v: i === undefined ? null : new THREE.Vector3(tPos[i * 3], tPos[i * 3 + 1], tPos[i * 3 + 2]) };
     });
+    const nlPool = Array.from({ length: 36 }, () => {   // 줌 적응형 노드명 라벨 풀 (L2~L4)
+      const el = document.createElement('div');
+      el.className = 'g-nl';
+      el.style.display = 'none';
+      labelWrap.appendChild(el);
+      return el;
+    });
 
     // ── 연결(이웃) 맵: 트리 + 크로스링크 ──
     const nbrTree = new Map();   // taxIdx → Set(taxIdx)
@@ -236,7 +243,7 @@
 
     // ── 선택 하이라이트 ──
     let filter = null, selCode = null, selSubtree = false;
-    let HL = null, hlPulse = null;
+    let HL = null, hlPulse = null, hlLabels = null, labelDirty = true;
 
     const recolor = () => {
       const pre = selCode ? selCode + '.' : null;
@@ -257,11 +264,12 @@
       eMat.opacity = on ? 0.05 : 0.14;
       xMat.opacity = on ? 0.07 : 0.28;
       tMat.uniforms.opacity.value = on ? 0.22 : 0.5;
+      labelWrap.classList.toggle('g-dim', on);
     };
 
     const clearHL = () => {
       if (HL) for (const o of HL) { scene.remove(o); o.geometry.dispose(); sizedMats.delete(o.material); o.material.dispose(); }
-      HL = null; hlPulse = null;
+      HL = null; hlPulse = null; hlLabels = null; labelDirty = true;
       if (selCode) { selCode = null; selSubtree = false; recolor(); }
       setDim(false);
     };
@@ -299,6 +307,8 @@
       const selPt = mkPts(sel, Math.max(18, tSize[ti] * 1.6), 0xffffff, 1);
       HL.push(selPt);
       hlPulse = { mat: selPt.material };
+      hlLabels = [ti, ...tN, ...xN.map(x => x[0])].slice(0, 40);
+      labelDirty = true;
       return { tree: tN.length, x: xN.length };
     };
 
@@ -322,6 +332,8 @@
         if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.5), mkPts(tP, tS, 0xffd166, 0.6));
         if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.5), mkPts(xP, xS, 0x4fd8c4, 0.6));
         counts = { tree: tN.length, x: xN.length };
+        hlLabels = [ti, ...tN, ...xN.map(x => x[0])].slice(0, 40);
+        labelDirty = true;
       }
       const selPt = mkPts(pp, 16, 0xffffff, 1);
       HL.push(selPt);
@@ -396,6 +408,46 @@
       hideCard();
     });
 
+    // ── 줌 적응형 노드명 라벨: 겉보기 크기(px) 상위 노드만, 선택 중엔 연결 노드 우선 ──
+    let lastLbl = 0;
+    const nv = new THREE.Vector3();
+    const updateLabels = () => {
+      const r = canvas.getBoundingClientRect();
+      if (!r.height) return;
+      const halfH = r.height * 0.5;
+      const pre = filter ? filter + '.' : null;
+      const cand = [];
+      const consider = (i, force) => {
+        const code = taxNodes[i][0];
+        const n = TAX.get(code);
+        if (!n || n.level < 2) return;                    // L1은 상시 라벨이 따로 있음
+        if (!force && filter && !(code === filter || code.startsWith(pre))) return;
+        nv.set(tPos[i * 3], tPos[i * 3 + 1], tPos[i * 3 + 2]);
+        const px = tSize[i] * halfH / camera.position.distanceTo(nv);
+        if (!force && px < 11) return;                    // 줌인해서 커 보일 때만
+        nv.project(camera);
+        if (nv.z > 1 || nv.x < -1.05 || nv.x > 1.05 || nv.y < -1.05 || nv.y > 1.05) return;
+        cand.push({ n, px, sx: (nv.x + 1) / 2 * r.width, sy: (-nv.y + 1) / 2 * r.height });
+      };
+      if (hlLabels) for (const i of hlLabels) consider(i, true);
+      else for (let i = 0; i < taxNodes.length; i++) consider(i, false);
+      cand.sort((a, b) => b.px - a.px);
+      const used = new Set();
+      let k = 0;
+      for (const c of cand) {                             // 화면 격자당 1개로 겹침 방지
+        if (k >= nlPool.length) break;
+        const cell = ((c.sx / 92) | 0) + ':' + ((c.sy / 44) | 0);
+        if (used.has(cell)) continue;
+        used.add(cell);
+        const el = nlPool[k++];
+        el.textContent = c.n.ko;
+        el.dataset.lv = c.n.level;
+        el.style.display = '';
+        el.style.transform = `translate(${c.sx}px, ${c.sy}px) translate(-50%, -145%)`;
+      }
+      for (; k < nlPool.length; k++) nlPool[k].style.display = 'none';
+    };
+
     // ── 리사이즈/루프 ──
     const wrap = container.querySelector('.g-wrap');
     const resize = () => {
@@ -426,6 +478,8 @@
         el.style.display = '';
         el.style.transform = `translate(${((v3.x + 1) / 2) * r.width}px, ${((-v3.y + 1) / 2) * r.height}px)`;
       }
+      const now = performance.now();
+      if (labelDirty || now - lastLbl > 170) { lastLbl = now; labelDirty = false; updateLabels(); }
     };
 
     const loadEl = document.getElementById('gLoad');
