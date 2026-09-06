@@ -32,7 +32,7 @@
     return tex;
   }
 
-  async function mount(container, ctx) {
+  async function mount(container, ctx, focusPid) {
     const { META, TAX, loadIndex, esc, num } = ctx;
     const me = S = { alive: true, disposables: [], raf: 0 };
 
@@ -359,14 +359,48 @@
     tgTree.onclick = () => { treeLines.visible = !treeLines.visible; taxPoints.visible = treeLines.visible; tgTree.classList.toggle('on', treeLines.visible); };
     tgX.onclick = () => { xLines.visible = !xLines.visible; tgX.classList.toggle('on', xLines.visible); };
 
-    // ── 픽킹 ──
+    // ── 픽킹 + 선택 ──
     const card = document.getElementById('gCard');
     const hideCard = () => { card.hidden = true; };
+    const selectTax = ti => {
+      const row = taxNodes[ti];
+      const n = TAX.get(row[0]);
+      if (!n) return;
+      const c = highlightTax(ti);
+      card.innerHTML = `<div class="g-card-k">분류 노드 — 연결 하이라이트</div><b>${esc(n.ko)}</b>
+        <div class="g-card-m">${esc(row[0])} · 하위 포함 ${num(n.tn)}편 ·
+          <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
+        <a class="g-card-btn" href="#/t/${encodeURIComponent(row[0])}">분류 열기 →</a>`;
+      card.hidden = false;
+    };
+    const selectPaper = pi => {
+      const row = IDX[pi];
+      const n = TAX.get(row[4]);
+      const c = highlightPaper(pi);
+      card.innerHTML = `<div class="g-card-k">논문 — 소속 분야 연결 하이라이트</div><b>${esc(row[1])}</b>
+        <div class="g-card-m">${row[2] || '—'} · 인용 ${num(row[3])}${n ? ' · ' + esc(n.ko) : ''} ·
+          <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
+        <a class="g-card-btn" href="#/p/${encodeURIComponent(row[0])}">상세 보기 →</a>`;
+      card.hidden = false;
+    };
+
+    // 카메라 플라이투 (smoothstep, 사용자 터치 시 취소)
+    let fly = null;
+    const flyTo = (target, dist) => {
+      const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+      if (!dir.lengthSq()) dir.set(0, 0.3, 1).normalize();
+      fly = {
+        t0: performance.now(), dur: 1400,
+        p0: camera.position.clone(), q0: controls.target.clone(),
+        p1: target.clone().add(dir.multiplyScalar(dist)), q1: target.clone(),
+      };
+    };
+
     const ray = new THREE.Raycaster();
     ray.params.Points = { threshold: 9 };
     const ndc = new THREE.Vector2();
     let downXY = null;
-    canvas.addEventListener('pointerdown', e => { downXY = [e.clientX, e.clientY]; });
+    canvas.addEventListener('pointerdown', e => { downXY = [e.clientX, e.clientY]; fly = null; });
     canvas.addEventListener('pointerup', e => {
       if (!downXY) return;
       const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]);
@@ -377,31 +411,15 @@
       ray.setFromCamera(ndc, camera);
       // 분류 노드 우선 (크고 적음), 그다음 논문
       const ht = ray.intersectObject(taxPoints, false);
-      if (ht.length && taxPoints.visible) {
-        const row = taxNodes[ht[0].index];
-        const n = TAX.get(row[0]);
-        if (n) {
-          const c = highlightTax(ht[0].index);
-          card.innerHTML = `<div class="g-card-k">분류 노드 — 연결 하이라이트</div><b>${esc(n.ko)}</b>
-            <div class="g-card-m">${esc(row[0])} · 하위 포함 ${num(n.tn)}편 ·
-              <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
-            <a class="g-card-btn" href="#/t/${encodeURIComponent(row[0])}">분류 열기 →</a>`;
-          card.hidden = false;
-          return;
-        }
+      if (ht.length && taxPoints.visible && TAX.get(taxNodes[ht[0].index][0])) {
+        selectTax(ht[0].index);
+        return;
       }
       const hp = ray.intersectObject(points, false)
         .filter(h => !filter || l1Of[h.index] === filter)
         .sort((a, b) => a.distanceToRay - b.distanceToRay);
       if (hp.length) {
-        const row = IDX[hp[0].index];
-        const n = TAX.get(row[4]);
-        const c = highlightPaper(hp[0].index);
-        card.innerHTML = `<div class="g-card-k">논문 — 소속 분야 연결 하이라이트</div><b>${esc(row[1])}</b>
-          <div class="g-card-m">${row[2] || '—'} · 인용 ${num(row[3])}${n ? ' · ' + esc(n.ko) : ''} ·
-            <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
-          <a class="g-card-btn" href="#/p/${encodeURIComponent(row[0])}">상세 보기 →</a>`;
-        card.hidden = false;
+        selectPaper(hp[0].index);
         return;
       }
       clearHL();
@@ -467,6 +485,13 @@
     const tick = () => {
       if (S !== me || !me.alive) return;
       me.raf = requestAnimationFrame(tick);
+      if (fly) {
+        const k = Math.min(1, (performance.now() - fly.t0) / fly.dur);
+        const e = k * k * (3 - 2 * k);
+        camera.position.lerpVectors(fly.p0, fly.p1, e);
+        controls.target.lerpVectors(fly.q0, fly.q1, e);
+        if (k >= 1) fly = null;
+      }
       controls.update();
       if (hlPulse) hlPulse.mat.uniforms.uMul.value = 1 + 0.22 * Math.sin(performance.now() * 0.005);
       renderer.render(scene, camera);
@@ -486,6 +511,16 @@
     if (loadEl) loadEl.remove();
     me.renderer = renderer;
     tick();
+
+    // ── 리스트/상세에서 넘어온 논문 포커스 (#/g/<pid>) ──
+    if (focusPid) {
+      const pi = IDX.findIndex(r => r[0] === focusPid);
+      if (pi >= 0) {
+        controls.autoRotate = false;
+        selectPaper(pi);
+        flyTo(new THREE.Vector3(pos[pi * 3], pos[pi * 3 + 1], pos[pi * 3 + 2]), 280);
+      }
+    }
   }
 
   function unmount() {

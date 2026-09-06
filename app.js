@@ -87,7 +87,7 @@ function route() {
   if (head === 'search') return vSearch('');
   if (head === 's') return vSearch(decodeURIComponent(arg));
   if (head === 'p') return vPaper(decodeURIComponent(arg));
-  if (head === 'g') return vGraph();
+  if (head === 'g') return vGraph(arg ? decodeURIComponent(arg) : null);
   if (head === 'about') return vAbout();
   vHome();
 }
@@ -110,7 +110,7 @@ function loadScript(src, ready) {
   });
 }
 
-async function vGraph() {
+async function vGraph(focusPid) {
   $view.innerHTML = `<div class="boot"><div class="spinner"></div><p>3D 엔진 로딩 중…</p></div>`;
   try {
     await loadScript('vendor/three.min.js', () => window.THREE);
@@ -122,7 +122,7 @@ async function vGraph() {
   }
   if (!location.hash.startsWith('#/g')) return;
   $view.innerHTML = '';
-  PSRGraph.mount($view, { META, TAX, loadIndex, esc, num });
+  PSRGraph.mount($view, { META, TAX, loadIndex, esc, num }, focusPid || null);
 }
 
 /* ── views ── */
@@ -236,12 +236,13 @@ function renderPaperRows(container, rows) {
   const step = () => {
     const frag = document.createDocumentFragment();
     for (const r of rows.slice(shown, shown + PAGE)) {
-      const a = document.createElement('a');
-      a.className = 'paper-item';
-      a.href = '#/p/' + encodeURIComponent(r[0]);
-      a.innerHTML = `<b>${esc(r[1])}</b>
-        <div class="sub"><span>${r[2] || '—'}</span><span class="cite">인용 ${num(r[3])}</span><span>${esc(r[4])}</span></div>`;
-      frag.appendChild(a);
+      const div = document.createElement('div');
+      div.className = 'paper-item';
+      const pid = encodeURIComponent(r[0]);
+      div.innerHTML = `<a class="pi-main" href="#/p/${pid}"><b>${esc(r[1])}</b>
+        <div class="sub"><span>${r[2] || '—'}</span><span class="cite">인용 ${num(r[3])}</span><span>${esc(r[4])}</span></div></a>
+        <a class="pi-g" href="#/g/${pid}" aria-label="그래프에서 위치 보기">🌌</a>`;
+      frag.appendChild(div);
     }
     shown = Math.min(shown + PAGE, rows.length);
     container.appendChild(frag);
@@ -324,7 +325,10 @@ async function vPaper(pid) {
     <div class="pd-title">${esc(p.t)}</div>
     <div class="pd-meta">${chips}</div>
     ${p.au ? `<div class="pd-authors">${esc(p.au)}</div>` : ''}
-    ${p.pl ? `<div class="pd-links"><a href="${esc(p.pl)}" target="_blank" rel="noopener">📄 원문 PDF 열기 (OA)</a></div>` : ''}
+    <div class="pd-links">
+      ${p.pl ? `<a href="${esc(p.pl)}" target="_blank" rel="noopener">📄 원문 PDF (OA)</a>` : ''}
+      <a class="ghost" href="#/g/${encodeURIComponent(pid)}">🌌 그래프 위치</a>
+    </div>
     ${p.ex ? `<div class="card-sec"><h3>📐 수식 · 원리 · 용어 해설</h3>${explHTML(p.ex)}
       <div class="tier-note">${p.tier === 1 ? 'AI 심층 해설 (검수 파이프라인 통과)' : '자동 생성 개요'}</div></div>` : ''}
     ${(absKo || absEn) ? `<div class="card-sec"><h3>📄 초록</h3>

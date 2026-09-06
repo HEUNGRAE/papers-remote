@@ -131,9 +131,15 @@ a { color: inherit; text-decoration: none; }
 .paper-list { display: flex; flex-direction: column; gap: 8px; }
 .paper-item {
   background: var(--card); border: 1px solid var(--line); border-radius: 13px;
-  padding: 12px 13px; display: block;
+  display: flex; align-items: stretch; overflow: hidden;
 }
-.paper-item:active { background: var(--card2); }
+.pi-main { flex: 1; min-width: 0; padding: 12px 13px; display: block; }
+.pi-main:active { background: var(--card2); }
+.pi-g {
+  display: flex; align-items: center; padding: 0 13px; font-size: 1.02rem;
+  border-left: 1px solid var(--line); opacity: .8;
+}
+.pi-g:active { background: var(--card2); }
 .paper-item b { font-size: .9rem; font-weight: 600; line-height: 1.4; display: block; }
 .paper-item .sub { display: flex; gap: 10px; margin-top: 5px; font-size: .72rem; color: var(--txt3); }
 .paper-item .sub .cite { color: var(--warn); }
