@@ -62,6 +62,14 @@
           <button id="gTgX" class="g-tg on" style="--tc:${REL.xref.css}">융합</button>
           <button id="gTgW" class="g-tg on" style="--tc:${REL.wref.css}">인접</button>
         </div>
+        <button class="g-sbtn" id="gSearchBtn" aria-label="노드 검색">🔍</button>
+        <div class="g-search" id="gSearch" hidden>
+          <div class="g-s-row">
+            <input id="gSearchIn" type="search" placeholder="분류 노드 검색 (한/영/코드)" enterkeyhint="search" autocomplete="off">
+            <button id="gSearchClose" aria-label="닫기">✕</button>
+          </div>
+          <div class="g-s-res" id="gSearchRes"></div>
+        </div>
         <div class="g-legend" id="gLegend">
           <div class="g-lg-head" id="gLegendHead">🔗 엣지 관계 범례</div>
           <div class="g-lg-body">
@@ -439,6 +447,53 @@
     tgW.onclick = () => { wLines.visible = !wLines.visible; tgW.classList.toggle('on', wLines.visible); };
     document.getElementById('gLegendHead').onclick = () =>
       document.getElementById('gLegend').classList.toggle('closed');
+
+    // ── 노드 검색 → 즉시 이동 ──
+    const sBox = document.getElementById('gSearch');
+    const sIn = document.getElementById('gSearchIn');
+    const sRes = document.getElementById('gSearchRes');
+    const renderSearch = q => {
+      if (!q) { sRes.innerHTML = '<div class="g-s-hint">노드 이름(한/영) 또는 코드로 검색 — 예: 양자, transformer, 4.2</div>'; return; }
+      const needle = q.toLowerCase();
+      const hits = [];
+      for (const [code, ti] of taxIdx) {
+        const n = TAX.get(code);
+        if (!n) continue;
+        if ((n.ko && n.ko.toLowerCase().includes(needle)) ||
+            (n.en && n.en.toLowerCase().includes(needle)) ||
+            code === q || code.startsWith(q + '.') || code.startsWith(q)) {
+          hits.push({ ti, n });
+          if (hits.length >= 500) break;
+        }
+      }
+      hits.sort((a, b) => b.n.tn - a.n.tn);
+      sRes.innerHTML = hits.length
+        ? hits.slice(0, 30).map(h =>
+            `<div class="g-s-item" data-ti="${h.ti}">
+               <b>${esc(h.n.ko)}</b>
+               <span>L${h.n.level} · ${esc(h.n.code)} · ${esc(h.n.en)} · ${num(h.n.tn)}편</span>
+             </div>`).join('')
+        : '<div class="g-s-hint">결과 없음</div>';
+    };
+    const openSearch = () => { sBox.hidden = false; renderSearch(sIn.value.trim()); sIn.focus(); };
+    const closeSearch = () => { sBox.hidden = true; sIn.blur(); };
+    document.getElementById('gSearchBtn').onclick = openSearch;
+    document.getElementById('gSearchClose').onclick = closeSearch;
+    sIn.addEventListener('input', () => renderSearch(sIn.value.trim()));
+    sIn.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { const f = sRes.querySelector('.g-s-item'); if (f) f.click(); }
+      if (e.key === 'Escape') closeSearch();
+    });
+    sRes.addEventListener('click', e => {
+      const it = e.target.closest('.g-s-item');
+      if (!it) return;
+      const ti = +it.dataset.ti;
+      closeSearch();
+      controls.autoRotate = false;
+      selectTax(ti);
+      flyTo(new THREE.Vector3(tPos[ti * 3], tPos[ti * 3 + 1], tPos[ti * 3 + 2]),
+            Math.min(700, Math.max(120, tSize[ti] * 14)));
+    });
 
     // ── 픽킹 + 선택 ──
     const card = document.getElementById('gCard');
