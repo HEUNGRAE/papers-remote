@@ -1,12 +1,21 @@
 /* Paper Studio Remote — 3D 지식그래프 뷰 (three.js r128)
-   레이어: ①논문 93k 점구름(L1 색) ②분류 트리 엣지 ③분야 간 크로스레퍼런스 링크
-   전역 PSRGraph.mount(container, ctx) / PSRGraph.unmount() 노출. ctx는 app.js가 주입. */
+   레이어: ①논문 93k 점구름(L1 색) ②분류 노드(크기∝편수) ③관계 엣지 풀
+   관계 정의(REL): hier 계층(상·하위) / xref 융합 참조 / wref 인접 참조 / member 소속
+   — data/graph/edges.json의 방향 가중치([a,b,w_ab,w_ba]) 기반, 선택 시 엣지에 관계 라벨 표시.
+   전역 PSRGraph.mount(container, ctx, focusPid) / PSRGraph.unmount() 노출. ctx는 app.js가 주입. */
 'use strict';
 
 (function () {
   const L1_COLOR = {
     '1': 0xff6b6b, '2': 0xffd166, '3': 0xff9f43, '4': 0x4fc3f7, '5': 0x66e08a,
     '6': 0xb388ff, '7': 0xf48fb1, '8': 0x26d0a8, '9': 0xe0e0e0, '10': 0xc5e1a5,
+  };
+  // 노드 간 관계 체계 — export의 edges.json types와 동기 유지
+  const REL = {
+    hier:   { hex: 0xffd166, css: '#ffd166', ko: '계층' },
+    xref:   { hex: 0x4fd8c4, css: '#4fd8c4', ko: '융합' },
+    wref:   { hex: 0xb388ff, css: '#b388ff', ko: '인접' },
+    member: { hex: 0xff9f43, css: '#ff9f43', ko: '소속' },
   };
   const DIM = 0.07; // 필터 제외 점 밝기 배율
 
@@ -28,8 +37,7 @@
     grd.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = grd;
     g.fillRect(0, 0, 64, 64);
-    const tex = new THREE.CanvasTexture(c);
-    return tex;
+    return new THREE.CanvasTexture(c);
   }
 
   async function mount(container, ctx, focusPid) {
@@ -41,25 +49,26 @@
         <canvas id="gCanvas"></canvas>
         <div class="g-chips" id="gChips"></div>
         <div class="g-toggles">
-          <button id="gTgTree" class="g-tg on">분류망</button>
-          <button id="gTgX" class="g-tg on">크로스링크</button>
+          <button id="gTgTree" class="g-tg on" style="--tc:${REL.hier.css}">계층</button>
+          <button id="gTgX" class="g-tg on" style="--tc:${REL.xref.css}">융합</button>
+          <button id="gTgW" class="g-tg on" style="--tc:${REL.wref.css}">인접</button>
         </div>
         <div class="g-labels" id="gLabels"></div>
         <div class="g-card" id="gCard" hidden></div>
         <div class="g-load" id="gLoad"><div class="spinner"></div><p id="gLoadTxt">그래프 데이터 로딩…</p></div>
-        <div class="g-hint">드래그 회전 · 핀치 줌 · 점 탭 = 연결 하이라이트 · 빈 곳 탭 = 해제</div>
+        <div class="g-hint">드래그 회전 · 핀치 줌 · 점 탭 = 관계 하이라이트 · 빈 곳 탭 = 해제</div>
       </div>`;
 
     const setLoad = t => { const el = document.getElementById('gLoadTxt'); if (el) el.textContent = t; };
 
     // ── 데이터 로드 ──
-    let gmeta, posBuf, taxNodes, xlinks, IDX;
+    let gmeta, posBuf, taxNodes, EDGES, IDX;
     try {
-      [gmeta, posBuf, taxNodes, xlinks] = await Promise.all([
+      [gmeta, posBuf, taxNodes, EDGES] = await Promise.all([
         fetch('data/graph/gmeta.json').then(r => r.json()),
         fetchBin('data/graph/pos.i16'),
         fetch('data/graph/tax.json').then(r => r.json()),
-        fetch('data/graph/xlinks.json').then(r => r.json()),
+        fetch('data/graph/edges.json').then(r => r.json()),
       ]);
       setLoad('논문 인덱스 로딩…');
       IDX = await loadIndex((d, t) => setLoad(`논문 인덱스 ${d}/${t}…`));
@@ -86,8 +95,7 @@
     controls.autoRotateSpeed = 0.5;
     controls.minDistance = 60;
     controls.maxDistance = 9000;
-    const stopAuto = () => { controls.autoRotate = false; };
-    canvas.addEventListener('pointerdown', stopAuto, { once: true });
+    canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, { once: true });
     S.disposables.push(() => controls.dispose());
 
     const sprite = circleSprite();
@@ -152,7 +160,7 @@
       return m;
     };
 
-    // ── ② 분류 노드 + 트리 엣지 ──
+    // ── ② 분류 노드 + 계층 엣지 ──
     const taxIdx = new Map(taxNodes.map((r, i) => [r[0], i]));
     const tPos = new Float32Array(taxNodes.length * 3);
     taxNodes.forEach((r, i) => { tPos[i * 3] = r[1]; tPos[i * 3 + 1] = r[2]; tPos[i * 3 + 2] = r[3]; });
@@ -179,28 +187,35 @@
     }
     const eGeo = new THREE.BufferGeometry();
     eGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs), 3));
-    const eMat = new THREE.LineBasicMaterial({ color: 0x8ca0ff, transparent: true, opacity: 0.14, depthWrite: false });
+    const eMat = new THREE.LineBasicMaterial({ color: REL.hier.hex, transparent: true, opacity: 0.1, depthWrite: false });
     const treeLines = new THREE.LineSegments(eGeo, eMat);
     scene.add(treeLines);
     S.disposables.push(() => { eGeo.dispose(); eMat.dispose(); });
 
-    // ── ③ 크로스레퍼런스 링크 ──
-    const xp = []; const xc = [];
-    const maxW = xlinks.length ? Math.log1p(xlinks[0][2]) : 1;
-    for (const [a, b, w] of xlinks) {
-      xp.push(tPos[a * 3], tPos[a * 3 + 1], tPos[a * 3 + 2], tPos[b * 3], tPos[b * 3 + 1], tPos[b * 3 + 2]);
-      const br = 0.25 + 0.75 * (Math.log1p(w) / maxW);
-      xc.push(0.31 * br, 0.85 * br, 0.77 * br, 0.31 * br, 0.85 * br, 0.77 * br);
-    }
-    const xGeo = new THREE.BufferGeometry();
-    xGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(xp), 3));
-    xGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(xc), 3));
-    const xMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.28, depthWrite: false, blending: THREE.AdditiveBlending });
-    const xLines = new THREE.LineSegments(xGeo, xMat);
-    scene.add(xLines);
-    S.disposables.push(() => { xGeo.dispose(); xMat.dispose(); });
+    // ── ③ 관계 풀 레이어 (융합 xref / 인접 wref) ──
+    const mkPoolLines = (pool, hex, op) => {
+      const P = [], C = [];
+      const c0 = new THREE.Color(hex);
+      const maxW = pool.length ? Math.log1p(pool[0][2] + pool[0][3]) : 1;   // export가 총가중치 desc 정렬
+      for (const [a, b, wab, wba] of pool) {
+        P.push(tPos[a * 3], tPos[a * 3 + 1], tPos[a * 3 + 2], tPos[b * 3], tPos[b * 3 + 1], tPos[b * 3 + 2]);
+        const br = 0.25 + 0.75 * (Math.log1p(wab + wba) / maxW);
+        C.push(c0.r * br, c0.g * br, c0.b * br, c0.r * br, c0.g * br, c0.b * br);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(P), 3));
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(C), 3));
+      const m = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending });
+      const o = new THREE.LineSegments(g, m);
+      scene.add(o);
+      S.disposables.push(() => { g.dispose(); m.dispose(); });
+      return o;
+    };
+    const xLines = mkPoolLines(EDGES.xref, REL.xref.hex, 0.26);
+    const wLines = mkPoolLines(EDGES.wref, REL.wref.hex, 0.18);
+    const xMat = xLines.material, wMat = wLines.material;
 
-    // ── L1 라벨 오버레이 ──
+    // ── L1 라벨 + 라벨 풀 ──
     const labelWrap = document.getElementById('gLabels');
     const l1s = [...TAX.values()].filter(n => n.level === 1).sort((a, b) => parseInt(a.code) - parseInt(b.code));
     const labels = l1s.map(n => {
@@ -219,8 +234,15 @@
       labelWrap.appendChild(el);
       return el;
     });
+    const elPool = Array.from({ length: 28 }, () => {   // 활성 엣지 관계 라벨 풀
+      const el = document.createElement('div');
+      el.className = 'g-el';
+      el.style.display = 'none';
+      labelWrap.appendChild(el);
+      return el;
+    });
 
-    // ── 연결(이웃) 맵: 트리 + 크로스링크 ──
+    // ── 연결(이웃) 맵: 계층 + 관계 풀 ──
     const nbrTree = new Map();   // taxIdx → Set(taxIdx)
     const addT = (a, b) => {
       if (!nbrTree.has(a)) nbrTree.set(a, new Set());
@@ -233,17 +255,21 @@
       if (pi === undefined) continue;
       addT(pi, ci); addT(ci, pi);
     }
-    const nbrX = new Map();      // taxIdx → [[taxIdx, w], ...]
-    for (const [a, b, w] of xlinks) {
-      if (!nbrX.has(a)) nbrX.set(a, []);
-      if (!nbrX.has(b)) nbrX.set(b, []);
-      nbrX.get(a).push([b, w]);
-      nbrX.get(b).push([a, w]);
+    const nbrEdges = new Map();  // taxIdx → [{j, type, out, inn, tot}]  out = 이 노드 → j 참조 가중치
+    const addE = (i, j, type, out, inn) => {
+      if (!nbrEdges.has(i)) nbrEdges.set(i, []);
+      nbrEdges.get(i).push({ j, type, out, inn, tot: out + inn });
+    };
+    for (const type of ['xref', 'wref']) {
+      for (const [a, b, wab, wba] of EDGES[type]) {
+        addE(a, b, type, wab, wba);
+        addE(b, a, type, wba, wab);
+      }
     }
 
     // ── 선택 하이라이트 ──
     let filter = null, selCode = null, selSubtree = false;
-    let HL = null, hlPulse = null, hlLabels = null, labelDirty = true;
+    let HL = null, hlPulse = null, hlLabels = null, hlEdgeLabels = null, labelDirty = true;
 
     const recolor = () => {
       const pre = selCode ? selCode + '.' : null;
@@ -261,15 +287,16 @@
     };
 
     const setDim = on => {          // 선택 중엔 배경 레이어를 가라앉혀 하이라이트 대비 확보
-      eMat.opacity = on ? 0.05 : 0.14;
-      xMat.opacity = on ? 0.07 : 0.28;
+      eMat.opacity = on ? 0.04 : 0.1;
+      xMat.opacity = on ? 0.06 : 0.26;
+      wMat.opacity = on ? 0.05 : 0.18;
       tMat.uniforms.opacity.value = on ? 0.22 : 0.5;
       labelWrap.classList.toggle('g-dim', on);
     };
 
     const clearHL = () => {
       if (HL) for (const o of HL) { scene.remove(o); o.geometry.dispose(); sizedMats.delete(o.material); o.material.dispose(); }
-      HL = null; hlPulse = null; hlLabels = null; labelDirty = true;
+      HL = null; hlPulse = null; hlLabels = null; hlEdgeLabels = null; labelDirty = true;
       if (selCode) { selCode = null; selSubtree = false; recolor(); }
       setDim(false);
     };
@@ -290,55 +317,89 @@
       const o = new THREE.LineSegments(g, m); o.renderOrder = 2; scene.add(o); return o;
     };
     const txyz = i => [tPos[i * 3], tPos[i * 3 + 1], tPos[i * 3 + 2]];
+    const midOf = (A, B) => [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
+    const relText = e => {          // 방향: → 내가 참조 / ← 참조받음 / ↔ 쌍방
+      const ko = REL[e.type].ko;
+      return e.out && e.inn ? `${ko} ↔${e.out + e.inn}` : e.out ? `${ko} →${e.out}` : `${ko} ←${e.inn}`;
+    };
 
-    const highlightTax = ti => {    // 선택 노드(백) + 트리 이웃(노랑) + 크로스링크 이웃(청록) + 소속 논문 유지 발광
+    // 노드 origin 기준: 계층(상·하위) + 관계 풀 엣지·마커·라벨 생성. faint=논문 선택 시 2차 연결용.
+    const buildNodeLinks = (ti, origin, faint) => {
+      const node = TAX.get(taxNodes[ti][0]);
+      const pIdx = node && node.parent ? taxIdx.get(node.parent) : undefined;
+      const kids = [...(nbrTree.get(ti) || [])].filter(j => j !== pIdx);
+      const typed = (nbrEdges.get(ti) || []).slice().sort((a, b) => b.tot - a.tot);
+      const opL = faint ? 0.5 : 0.85, opP = faint ? 0.6 : 0.9, szF = faint ? 1.12 : 1.3;
+      const labelCap = faint ? 6 : 14;
+      const hE = [], hP = [], hS = [];
+      const pushHier = (j, lbl) => {
+        const T = txyz(j);
+        hE.push(...origin, ...T); hP.push(...T); hS.push(tSize[j] * szF);
+        const m = midOf(origin, T);
+        hlEdgeLabels.push({ x: m[0], y: m[1], z: m[2], t: lbl, c: REL.hier.css });
+      };
+      if (pIdx !== undefined) pushHier(pIdx, '상위');
+      for (const j of kids) pushHier(j, '하위');
+      if (hE.length) HL.push(mkLines(hE, REL.hier.hex, opL), mkPts(hP, hS, REL.hier.hex, opP));
+      const grp = { xref: { E: [], P: [], Sz: [] }, wref: { E: [], P: [], Sz: [] } };
+      typed.forEach((e, rank) => {
+        const T = txyz(e.j);
+        const g = grp[e.type];
+        g.E.push(...origin, ...T); g.P.push(...T); g.Sz.push(tSize[e.j] * (szF - 0.05));
+        if (rank < labelCap) {
+          const m = midOf(origin, T);
+          hlEdgeLabels.push({ x: m[0], y: m[1], z: m[2], t: relText(e), c: REL[e.type].css });
+        }
+      });
+      for (const k of ['xref', 'wref']) {
+        const g = grp[k];
+        if (g.E.length) HL.push(mkLines(g.E, REL[k].hex, opL), mkPts(g.P, g.Sz, REL[k].hex, opP));
+      }
+      return {
+        nbrs: [...(pIdx !== undefined ? [pIdx] : []), ...kids, ...typed.map(e => e.j)],
+        hier: (pIdx !== undefined ? 1 : 0) + kids.length,
+        x: typed.filter(e => e.type === 'xref').length,
+        w: typed.filter(e => e.type === 'wref').length,
+      };
+    };
+
+    const highlightTax = ti => {
       clearHL();
       selCode = taxNodes[ti][0]; selSubtree = true;
       recolor(); setDim(true);
+      HL = []; hlEdgeLabels = [];
       const sel = txyz(ti);
-      const tN = [...(nbrTree.get(ti) || [])];
-      const xN = nbrX.get(ti) || [];
-      const tE = [], tP = [], tS = [], xE = [], xP = [], xS = [];
-      for (const j of tN) { tE.push(...sel, ...txyz(j)); tP.push(...txyz(j)); tS.push(tSize[j] * 1.3); }
-      for (const [j] of xN) { xE.push(...sel, ...txyz(j)); xP.push(...txyz(j)); xS.push(tSize[j] * 1.25); }
-      HL = [];
-      if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.85), mkPts(tP, tS, 0xffd166, 0.9));
-      if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.85), mkPts(xP, xS, 0x4fd8c4, 0.9));
+      const r = buildNodeLinks(ti, sel, false);
       const selPt = mkPts(sel, Math.max(18, tSize[ti] * 1.6), 0xffffff, 1);
       HL.push(selPt);
       hlPulse = { mat: selPt.material };
-      hlLabels = [ti, ...tN, ...xN.map(x => x[0])].slice(0, 40);
+      hlLabels = [ti, ...r.nbrs].slice(0, 40);
       labelDirty = true;
-      return { tree: tN.length, x: xN.length };
+      return r;
     };
 
-    const highlightPaper = pi => {  // 논문(백) → 소속 분류(주황 엣지) → 그 분류의 연결망(옅게)
+    const highlightPaper = pi => {  // 논문(백) —소속(주황)→ 분류, 그 분류의 관계망은 옅게
       clearHL();
       const l4 = IDX[pi][4];
       const ti = taxIdx.get(l4);
       selCode = l4; selSubtree = false;
       recolor(); setDim(true);
       const pp = [pos[pi * 3], pos[pi * 3 + 1], pos[pi * 3 + 2]];
-      HL = [];
-      let counts = { tree: 0, x: 0 };
+      HL = []; hlEdgeLabels = [];
+      let r = { hier: 0, x: 0, w: 0 };
       if (ti !== undefined) {
         const home = txyz(ti);
-        HL.push(mkLines([...pp, ...home], 0xff9f43, 0.9), mkPts(home, Math.max(16, tSize[ti] * 1.5), 0xff9f43, 0.95));
-        const tN = [...(nbrTree.get(ti) || [])];
-        const xN = nbrX.get(ti) || [];
-        const tE = [], tP = [], tS = [], xE = [], xP = [], xS = [];
-        for (const j of tN) { tE.push(...home, ...txyz(j)); tP.push(...txyz(j)); tS.push(tSize[j] * 1.15); }
-        for (const [j] of xN) { xE.push(...home, ...txyz(j)); xP.push(...txyz(j)); xS.push(tSize[j] * 1.1); }
-        if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.5), mkPts(tP, tS, 0xffd166, 0.6));
-        if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.5), mkPts(xP, xS, 0x4fd8c4, 0.6));
-        counts = { tree: tN.length, x: xN.length };
-        hlLabels = [ti, ...tN, ...xN.map(x => x[0])].slice(0, 40);
-        labelDirty = true;
+        HL.push(mkLines([...pp, ...home], REL.member.hex, 0.9), mkPts(home, Math.max(16, tSize[ti] * 1.5), REL.member.hex, 0.95));
+        const m = midOf(pp, home);
+        hlEdgeLabels.push({ x: m[0], y: m[1], z: m[2], t: REL.member.ko, c: REL.member.css });
+        r = buildNodeLinks(ti, home, true);
+        hlLabels = [ti, ...r.nbrs].slice(0, 40);
       }
       const selPt = mkPts(pp, 16, 0xffffff, 1);
       HL.push(selPt);
       hlPulse = { mat: selPt.material };
-      return counts;
+      labelDirty = true;
+      return r;
     };
 
     // ── 필터/토글 ──
@@ -356,30 +417,32 @@
     });
     const tgTree = document.getElementById('gTgTree');
     const tgX = document.getElementById('gTgX');
+    const tgW = document.getElementById('gTgW');
     tgTree.onclick = () => { treeLines.visible = !treeLines.visible; taxPoints.visible = treeLines.visible; tgTree.classList.toggle('on', treeLines.visible); };
     tgX.onclick = () => { xLines.visible = !xLines.visible; tgX.classList.toggle('on', xLines.visible); };
+    tgW.onclick = () => { wLines.visible = !wLines.visible; tgW.classList.toggle('on', wLines.visible); };
 
     // ── 픽킹 + 선택 ──
     const card = document.getElementById('gCard');
     const hideCard = () => { card.hidden = true; };
+    const countsHTML = r =>
+      `<span class="g-ch">계층 ${r.hier}</span> <span class="g-cx">융합 ${r.x}</span> <span class="g-cw">인접 ${r.w}</span>`;
     const selectTax = ti => {
       const row = taxNodes[ti];
       const n = TAX.get(row[0]);
       if (!n) return;
-      const c = highlightTax(ti);
-      card.innerHTML = `<div class="g-card-k">분류 노드 — 연결 하이라이트</div><b>${esc(n.ko)}</b>
-        <div class="g-card-m">${esc(row[0])} · 하위 포함 ${num(n.tn)}편 ·
-          <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
+      const r = highlightTax(ti);
+      card.innerHTML = `<div class="g-card-k">분류 노드 — 관계 하이라이트</div><b>${esc(n.ko)}</b>
+        <div class="g-card-m">${esc(row[0])} · 하위 포함 ${num(n.tn)}편 · ${countsHTML(r)}</div>
         <a class="g-card-btn" href="#/t/${encodeURIComponent(row[0])}">분류 열기 →</a>`;
       card.hidden = false;
     };
     const selectPaper = pi => {
       const row = IDX[pi];
       const n = TAX.get(row[4]);
-      const c = highlightPaper(pi);
-      card.innerHTML = `<div class="g-card-k">논문 — 소속 분야 연결 하이라이트</div><b>${esc(row[1])}</b>
-        <div class="g-card-m">${row[2] || '—'} · 인용 ${num(row[3])}${n ? ' · ' + esc(n.ko) : ''} ·
-          <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
+      const r = highlightPaper(pi);
+      card.innerHTML = `<div class="g-card-k">논문 — 소속 분류의 관계 하이라이트</div><b>${esc(row[1])}</b>
+        <div class="g-card-m">${row[2] || '—'} · 인용 ${num(row[3])}${n ? ' · ' + esc(n.ko) : ''} · ${countsHTML(r)}</div>
         <a class="g-card-btn" href="#/p/${encodeURIComponent(row[0])}">상세 보기 →</a>`;
       card.hidden = false;
     };
@@ -409,7 +472,6 @@
       const r = canvas.getBoundingClientRect();
       ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, camera);
-      // 분류 노드 우선 (크고 적음), 그다음 논문
       const ht = ray.intersectObject(taxPoints, false);
       if (ht.length && taxPoints.visible && TAX.get(taxNodes[ht[0].index][0])) {
         selectTax(ht[0].index);
@@ -426,7 +488,7 @@
       hideCard();
     });
 
-    // ── 줌 적응형 노드명 라벨: 겉보기 크기(px) 상위 노드만, 선택 중엔 연결 노드 우선 ──
+    // ── 줌 적응형 노드명 라벨 + 활성 엣지 관계 라벨 ──
     let lastLbl = 0;
     const nv = new THREE.Vector3();
     const updateLabels = () => {
@@ -464,6 +526,26 @@
         el.style.transform = `translate(${c.sx}px, ${c.sy}px) translate(-50%, -145%)`;
       }
       for (; k < nlPool.length; k++) nlPool[k].style.display = 'none';
+      // 활성 엣지 관계 라벨 (선택 중에만)
+      let ek = 0;
+      if (hlEdgeLabels) {
+        const eus = new Set();
+        for (const L of hlEdgeLabels) {
+          if (ek >= elPool.length) break;
+          nv.set(L.x, L.y, L.z).project(camera);
+          if (nv.z > 1 || nv.x < -1.02 || nv.x > 1.02 || nv.y < -1.02 || nv.y > 1.02) continue;
+          const sx = (nv.x + 1) / 2 * r.width, sy = (-nv.y + 1) / 2 * r.height;
+          const cell = ((sx / 72) | 0) + ':' + ((sy / 28) | 0);
+          if (eus.has(cell)) continue;
+          eus.add(cell);
+          const el = elPool[ek++];
+          el.textContent = L.t;
+          el.style.color = L.c;
+          el.style.display = '';
+          el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`;
+        }
+      }
+      for (; ek < elPool.length; ek++) elPool[ek].style.display = 'none';
     };
 
     // ── 리사이즈/루프 ──

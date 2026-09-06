@@ -232,7 +232,7 @@ details.abs .body { margin-top: 6px; font-size: .82rem; color: var(--txt2); }
   background: rgba(20, 27, 50, .78); color: #6b78a5;
   border: 1px solid rgba(124, 140, 255, .25); backdrop-filter: blur(6px);
 }
-.g-tg.on { color: #4fd8c4; border-color: rgba(79, 216, 196, .5); }
+.g-tg.on { color: var(--tc, #4fd8c4); border-color: color-mix(in srgb, var(--tc, #4fd8c4) 50%, transparent); }
 .g-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .g-l1 {
   position: absolute; top: 0; left: 0; font-size: .66rem; font-weight: 800;
@@ -256,8 +256,14 @@ details.abs .body { margin-top: 6px; font-size: .82rem; color: var(--txt2); }
 .g-card b { display: block; font-size: .88rem; line-height: 1.4; margin: 2px 0 4px; }
 .g-card-k { font-size: .64rem; color: #4fd8c4; font-weight: 800; letter-spacing: .05em; }
 .g-card-m { font-size: .72rem; color: #9aa7cf; margin-bottom: 8px; }
-.g-ct { color: #ffd166; font-weight: 700; }
+.g-ch { color: #ffd166; font-weight: 700; }
 .g-cx { color: #4fd8c4; font-weight: 700; }
+.g-cw { color: #b388ff; font-weight: 700; }
+.g-el {
+  position: absolute; top: 0; left: 0; font-size: .56rem; font-weight: 800;
+  padding: 1px 7px; border-radius: 999px; background: rgba(8, 12, 26, .8);
+  border: 1px solid rgba(124, 140, 255, .18); white-space: nowrap; letter-spacing: .02em;
+}
 .g-card-btn {
   display: inline-block; padding: 8px 14px; border-radius: 10px; font-size: .78rem; font-weight: 700;
   background: linear-gradient(135deg, #7c8cff, #4fd8c4); color: #fff;
