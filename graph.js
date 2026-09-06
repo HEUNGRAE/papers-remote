@@ -44,6 +44,15 @@
     const { META, TAX, loadIndex, esc, num } = ctx;
     const me = S = { alive: true, disposables: [], raf: 0 };
 
+    const legendRows = [
+      ['hier', '계층 (상·하위)'],
+      ['xref', '융합 참조'],
+      ['wref', '인접 참조'],
+      ['member', '소속 (논문→분류)'],
+    ].map(([k, label]) =>
+      `<div class="g-lg-row"><span class="sw" style="background:${REL[k].css};box-shadow:0 0 5px ${REL[k].css}"></span>${label}</div>`
+    ).join('');
+
     container.innerHTML = `
       <div class="g-wrap">
         <canvas id="gCanvas"></canvas>
@@ -52,6 +61,13 @@
           <button id="gTgTree" class="g-tg on" style="--tc:${REL.hier.css}">계층</button>
           <button id="gTgX" class="g-tg on" style="--tc:${REL.xref.css}">융합</button>
           <button id="gTgW" class="g-tg on" style="--tc:${REL.wref.css}">인접</button>
+        </div>
+        <div class="g-legend" id="gLegend">
+          <div class="g-lg-head" id="gLegendHead">🔗 엣지 관계 범례</div>
+          <div class="g-lg-body">
+            ${legendRows}
+            <div class="g-lg-note">→ 참조함 · ← 참조받음 · ↔ 쌍방</div>
+          </div>
         </div>
         <div class="g-labels" id="gLabels"></div>
         <div class="g-card" id="gCard" hidden></div>
@@ -421,6 +437,8 @@
     tgTree.onclick = () => { treeLines.visible = !treeLines.visible; taxPoints.visible = treeLines.visible; tgTree.classList.toggle('on', treeLines.visible); };
     tgX.onclick = () => { xLines.visible = !xLines.visible; tgX.classList.toggle('on', xLines.visible); };
     tgW.onclick = () => { wLines.visible = !wLines.visible; tgW.classList.toggle('on', wLines.visible); };
+    document.getElementById('gLegendHead').onclick = () =>
+      document.getElementById('gLegend').classList.toggle('closed');
 
     // ── 픽킹 + 선택 ──
     const card = document.getElementById('gCard');

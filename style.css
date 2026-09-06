@@ -264,6 +264,18 @@ details.abs .body { margin-top: 6px; font-size: .82rem; color: var(--txt2); }
   padding: 1px 7px; border-radius: 999px; background: rgba(8, 12, 26, .8);
   border: 1px solid rgba(124, 140, 255, .18); white-space: nowrap; letter-spacing: .02em;
 }
+.g-legend {
+  position: absolute; top: 46px; left: 10px; z-index: 6;
+  background: rgba(20, 27, 50, .78); border: 1px solid rgba(124, 140, 255, .25);
+  border-radius: 12px; padding: 7px 10px; backdrop-filter: blur(6px);
+  font-size: .64rem; color: #cfd6f5;
+}
+.g-lg-head { font-weight: 800; font-size: .6rem; color: #9aa7cf; cursor: pointer; user-select: none; }
+.g-lg-body { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.g-legend.closed .g-lg-body { display: none; }
+.g-lg-row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.g-lg-row .sw { width: 15px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+.g-lg-note { margin-top: 3px; color: #6b78a5; font-size: .56rem; }
 .g-card-btn {
   display: inline-block; padding: 8px 14px; border-radius: 10px; font-size: .78rem; font-weight: 700;
   background: linear-gradient(135deg, #7c8cff, #4fd8c4); color: #fff;
