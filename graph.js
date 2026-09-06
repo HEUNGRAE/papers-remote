@@ -118,16 +118,53 @@
     scene.add(points);
     S.disposables.push(() => { pGeo.dispose(); pMat.dispose(); sprite.dispose(); });
 
+    // ── per-point 크기 셰이더 (노드 크기 ∝ 편수) ──
+    const sizedMats = new Set();
+    let uScaleVal = 400;
+    const sizedMat = (hex, op) => {
+      const m = new THREE.ShaderMaterial({
+        uniforms: {
+          map: { value: sprite },
+          color: { value: new THREE.Color(hex) },
+          opacity: { value: op },
+          uMul: { value: 1 },
+          uScale: { value: uScaleVal },
+        },
+        vertexShader: `
+          attribute float size;
+          uniform float uScale, uMul;
+          void main() {
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = size * uMul * uScale / max(1.0, -mv.z);
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          uniform sampler2D map;
+          uniform vec3 color;
+          uniform float opacity;
+          void main() {
+            vec4 t = texture2D(map, gl_PointCoord);
+            gl_FragColor = vec4(color * t.rgb, opacity * t.a);
+          }`,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      sizedMats.add(m);
+      return m;
+    };
+
     // ── ② 분류 노드 + 트리 엣지 ──
     const taxIdx = new Map(taxNodes.map((r, i) => [r[0], i]));
     const tPos = new Float32Array(taxNodes.length * 3);
     taxNodes.forEach((r, i) => { tPos[i * 3] = r[1]; tPos[i * 3 + 1] = r[2]; tPos[i * 3 + 2] = r[3]; });
+    const tSize = new Float32Array(taxNodes.length);       // 크기 = 4 + 2.2·log₂(편수), 5~36 클램프
+    taxNodes.forEach((r, i) => {
+      const tn = (TAX.get(r[0]) || {}).tn || 1;
+      tSize[i] = Math.min(36, Math.max(5, 4 + 2.2 * Math.log2(tn + 1)));
+    });
     const tGeo = new THREE.BufferGeometry();
     tGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
-    const tMat = new THREE.PointsMaterial({
-      size: 9, map: sprite, color: 0xffffff, transparent: true, opacity: 0.5,
-      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
-    });
+    tGeo.setAttribute('size', new THREE.BufferAttribute(tSize, 1));
+    const tMat = sizedMat(0xffffff, 0.5);
     const taxPoints = new THREE.Points(tGeo, tMat);
     scene.add(taxPoints);
     S.disposables.push(() => { tGeo.dispose(); tMat.dispose(); });
@@ -219,22 +256,24 @@
     const setDim = on => {          // 선택 중엔 배경 레이어를 가라앉혀 하이라이트 대비 확보
       eMat.opacity = on ? 0.05 : 0.14;
       xMat.opacity = on ? 0.07 : 0.28;
-      tMat.opacity = on ? 0.22 : 0.5;
+      tMat.uniforms.opacity.value = on ? 0.22 : 0.5;
     };
 
     const clearHL = () => {
-      if (HL) for (const o of HL) { scene.remove(o); o.geometry.dispose(); o.material.dispose(); }
+      if (HL) for (const o of HL) { scene.remove(o); o.geometry.dispose(); sizedMats.delete(o.material); o.material.dispose(); }
       HL = null; hlPulse = null;
       if (selCode) { selCode = null; selSubtree = false; recolor(); }
       setDim(false);
     };
     S.disposables.push(clearHL);
 
-    const mkPts = (arr, size, hex, op) => {
+    const mkPts = (arr, sizes, hex, op) => {   // sizes: number(전체 동일) 또는 per-point 배열
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
-      const m = new THREE.PointsMaterial({ size, map: sprite, color: hex, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
-      const o = new THREE.Points(g, m); o.renderOrder = 3; scene.add(o); return o;
+      const n = arr.length / 3;
+      const sz = typeof sizes === 'number' ? new Float32Array(n).fill(sizes) : new Float32Array(sizes);
+      g.setAttribute('size', new THREE.BufferAttribute(sz, 1));
+      const o = new THREE.Points(g, sizedMat(hex, op)); o.renderOrder = 3; scene.add(o); return o;
     };
     const mkLines = (arr, hex, op) => {
       const g = new THREE.BufferGeometry();
@@ -251,15 +290,15 @@
       const sel = txyz(ti);
       const tN = [...(nbrTree.get(ti) || [])];
       const xN = nbrX.get(ti) || [];
-      const tE = [], tP = [], xE = [], xP = [];
-      for (const j of tN) { tE.push(...sel, ...txyz(j)); tP.push(...txyz(j)); }
-      for (const [j] of xN) { xE.push(...sel, ...txyz(j)); xP.push(...txyz(j)); }
+      const tE = [], tP = [], tS = [], xE = [], xP = [], xS = [];
+      for (const j of tN) { tE.push(...sel, ...txyz(j)); tP.push(...txyz(j)); tS.push(tSize[j] * 1.3); }
+      for (const [j] of xN) { xE.push(...sel, ...txyz(j)); xP.push(...txyz(j)); xS.push(tSize[j] * 1.25); }
       HL = [];
-      if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.85), mkPts(tP, 13, 0xffd166, 0.9));
-      if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.85), mkPts(xP, 12, 0x4fd8c4, 0.9));
-      const selPt = mkPts(sel, 24, 0xffffff, 1);
+      if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.85), mkPts(tP, tS, 0xffd166, 0.9));
+      if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.85), mkPts(xP, xS, 0x4fd8c4, 0.9));
+      const selPt = mkPts(sel, Math.max(18, tSize[ti] * 1.6), 0xffffff, 1);
       HL.push(selPt);
-      hlPulse = { mat: selPt.material, base: 24 };
+      hlPulse = { mat: selPt.material };
       return { tree: tN.length, x: xN.length };
     };
 
@@ -274,19 +313,19 @@
       let counts = { tree: 0, x: 0 };
       if (ti !== undefined) {
         const home = txyz(ti);
-        HL.push(mkLines([...pp, ...home], 0xff9f43, 0.9), mkPts(home, 15, 0xff9f43, 0.95));
+        HL.push(mkLines([...pp, ...home], 0xff9f43, 0.9), mkPts(home, Math.max(16, tSize[ti] * 1.5), 0xff9f43, 0.95));
         const tN = [...(nbrTree.get(ti) || [])];
         const xN = nbrX.get(ti) || [];
-        const tE = [], tP = [], xE = [], xP = [];
-        for (const j of tN) { tE.push(...home, ...txyz(j)); tP.push(...txyz(j)); }
-        for (const [j] of xN) { xE.push(...home, ...txyz(j)); xP.push(...txyz(j)); }
-        if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.5), mkPts(tP, 10, 0xffd166, 0.6));
-        if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.5), mkPts(xP, 10, 0x4fd8c4, 0.6));
+        const tE = [], tP = [], tS = [], xE = [], xP = [], xS = [];
+        for (const j of tN) { tE.push(...home, ...txyz(j)); tP.push(...txyz(j)); tS.push(tSize[j] * 1.15); }
+        for (const [j] of xN) { xE.push(...home, ...txyz(j)); xP.push(...txyz(j)); xS.push(tSize[j] * 1.1); }
+        if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.5), mkPts(tP, tS, 0xffd166, 0.6));
+        if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.5), mkPts(xP, xS, 0x4fd8c4, 0.6));
         counts = { tree: tN.length, x: xN.length };
       }
-      const selPt = mkPts(pp, 18, 0xffffff, 1);
+      const selPt = mkPts(pp, 16, 0xffffff, 1);
       HL.push(selPt);
-      hlPulse = { mat: selPt.material, base: 18 };
+      hlPulse = { mat: selPt.material };
       return counts;
     };
 
@@ -365,6 +404,8 @@
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      uScaleVal = h * renderer.getPixelRatio() * 0.5;   // gl_PointSize 감쇠 기준 (물리 px)
+      for (const m of sizedMats) m.uniforms.uScale.value = uScaleVal;
     };
     resize();
     window.addEventListener('resize', resize);
@@ -375,7 +416,7 @@
       if (S !== me || !me.alive) return;
       me.raf = requestAnimationFrame(tick);
       controls.update();
-      if (hlPulse) hlPulse.mat.size = hlPulse.base * (1 + 0.22 * Math.sin(performance.now() * 0.005));
+      if (hlPulse) hlPulse.mat.uniforms.uMul.value = 1 + 0.22 * Math.sin(performance.now() * 0.005);
       renderer.render(scene, camera);
       const r = canvas.getBoundingClientRect();
       for (const { el, v } of labels) {
