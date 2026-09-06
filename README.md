@@ -23,9 +23,12 @@ data/
   papers/p_{0000..1023}.json      상세 샤드 (FNV-1a(paper_id) % 1024)
 ```
 
-## 갱신
+## 갱신 (자동)
 
-원본 PC의 `papers/tools/_build_remote_app.py` 실행 → `data/` 재생성 → commit & push.
+원본 PC cron이 **매일 07:00** `papers/tools/_deploy_remote_app.py`를 실행:
+DB 내용 시그니처(논문/분류/해설/초록 카운트)가 마지막 배포와 다르면
+`_build_remote_app.py`로 `data/` 재생성 → 자동 commit & push → Pages 재빌드.
+변화가 없으면 아무것도 하지 않는다. 수동 갱신도 같은 스크립트를 실행하면 된다.
 
 > 데이터 출처: 로컬 `papers_db.sqlite` 스냅샷. 해설 내 "(원문 확인 필요)" 표기는
 > DB의 분류/초록 메타데이터가 실제 저작과 다를 수 있음을 의미한다.
