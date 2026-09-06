@@ -47,7 +47,7 @@
         <div class="g-labels" id="gLabels"></div>
         <div class="g-card" id="gCard" hidden></div>
         <div class="g-load" id="gLoad"><div class="spinner"></div><p id="gLoadTxt">그래프 데이터 로딩…</p></div>
-        <div class="g-hint">드래그 회전 · 핀치 줌 · 점 탭 = 상세</div>
+        <div class="g-hint">드래그 회전 · 핀치 줌 · 점 탭 = 연결 하이라이트 · 빈 곳 탭 = 해제</div>
       </div>`;
 
     const setLoad = t => { const el = document.getElementById('gLoadTxt'); if (el) el.textContent = t; };
@@ -176,8 +176,121 @@
       return { el, v: i === undefined ? null : new THREE.Vector3(tPos[i * 3], tPos[i * 3 + 1], tPos[i * 3 + 2]) };
     });
 
+    // ── 연결(이웃) 맵: 트리 + 크로스링크 ──
+    const nbrTree = new Map();   // taxIdx → Set(taxIdx)
+    const addT = (a, b) => {
+      if (!nbrTree.has(a)) nbrTree.set(a, new Set());
+      nbrTree.get(a).add(b);
+    };
+    for (const [code] of taxNodes) {
+      const n = TAX.get(code);
+      if (!n || !n.parent) continue;
+      const pi = taxIdx.get(n.parent), ci = taxIdx.get(code);
+      if (pi === undefined) continue;
+      addT(pi, ci); addT(ci, pi);
+    }
+    const nbrX = new Map();      // taxIdx → [[taxIdx, w], ...]
+    for (const [a, b, w] of xlinks) {
+      if (!nbrX.has(a)) nbrX.set(a, []);
+      if (!nbrX.has(b)) nbrX.set(b, []);
+      nbrX.get(a).push([b, w]);
+      nbrX.get(b).push([a, w]);
+    }
+
+    // ── 선택 하이라이트 ──
+    let filter = null, selCode = null, selSubtree = false;
+    let HL = null, hlPulse = null;
+
+    const recolor = () => {
+      const pre = selCode ? selCode + '.' : null;
+      for (let i = 0; i < N; i++) {
+        let f = (!filter || l1Of[i] === filter) ? 1 : DIM;
+        if (selCode) {
+          const l4 = IDX[i][4];
+          f *= (l4 === selCode || (selSubtree && l4.startsWith(pre))) ? 1 : 0.1;
+        }
+        col[i * 3] = baseCol[i * 3] * f;
+        col[i * 3 + 1] = baseCol[i * 3 + 1] * f;
+        col[i * 3 + 2] = baseCol[i * 3 + 2] * f;
+      }
+      pGeo.attributes.color.needsUpdate = true;
+    };
+
+    const setDim = on => {          // 선택 중엔 배경 레이어를 가라앉혀 하이라이트 대비 확보
+      eMat.opacity = on ? 0.05 : 0.14;
+      xMat.opacity = on ? 0.07 : 0.28;
+      tMat.opacity = on ? 0.22 : 0.5;
+    };
+
+    const clearHL = () => {
+      if (HL) for (const o of HL) { scene.remove(o); o.geometry.dispose(); o.material.dispose(); }
+      HL = null; hlPulse = null;
+      if (selCode) { selCode = null; selSubtree = false; recolor(); }
+      setDim(false);
+    };
+    S.disposables.push(clearHL);
+
+    const mkPts = (arr, size, hex, op) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
+      const m = new THREE.PointsMaterial({ size, map: sprite, color: hex, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
+      const o = new THREE.Points(g, m); o.renderOrder = 3; scene.add(o); return o;
+    };
+    const mkLines = (arr, hex, op) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
+      const m = new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending });
+      const o = new THREE.LineSegments(g, m); o.renderOrder = 2; scene.add(o); return o;
+    };
+    const txyz = i => [tPos[i * 3], tPos[i * 3 + 1], tPos[i * 3 + 2]];
+
+    const highlightTax = ti => {    // 선택 노드(백) + 트리 이웃(노랑) + 크로스링크 이웃(청록) + 소속 논문 유지 발광
+      clearHL();
+      selCode = taxNodes[ti][0]; selSubtree = true;
+      recolor(); setDim(true);
+      const sel = txyz(ti);
+      const tN = [...(nbrTree.get(ti) || [])];
+      const xN = nbrX.get(ti) || [];
+      const tE = [], tP = [], xE = [], xP = [];
+      for (const j of tN) { tE.push(...sel, ...txyz(j)); tP.push(...txyz(j)); }
+      for (const [j] of xN) { xE.push(...sel, ...txyz(j)); xP.push(...txyz(j)); }
+      HL = [];
+      if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.85), mkPts(tP, 13, 0xffd166, 0.9));
+      if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.85), mkPts(xP, 12, 0x4fd8c4, 0.9));
+      const selPt = mkPts(sel, 24, 0xffffff, 1);
+      HL.push(selPt);
+      hlPulse = { mat: selPt.material, base: 24 };
+      return { tree: tN.length, x: xN.length };
+    };
+
+    const highlightPaper = pi => {  // 논문(백) → 소속 분류(주황 엣지) → 그 분류의 연결망(옅게)
+      clearHL();
+      const l4 = IDX[pi][4];
+      const ti = taxIdx.get(l4);
+      selCode = l4; selSubtree = false;
+      recolor(); setDim(true);
+      const pp = [pos[pi * 3], pos[pi * 3 + 1], pos[pi * 3 + 2]];
+      HL = [];
+      let counts = { tree: 0, x: 0 };
+      if (ti !== undefined) {
+        const home = txyz(ti);
+        HL.push(mkLines([...pp, ...home], 0xff9f43, 0.9), mkPts(home, 15, 0xff9f43, 0.95));
+        const tN = [...(nbrTree.get(ti) || [])];
+        const xN = nbrX.get(ti) || [];
+        const tE = [], tP = [], xE = [], xP = [];
+        for (const j of tN) { tE.push(...home, ...txyz(j)); tP.push(...txyz(j)); }
+        for (const [j] of xN) { xE.push(...home, ...txyz(j)); xP.push(...txyz(j)); }
+        if (tE.length) HL.push(mkLines(tE, 0xffd166, 0.5), mkPts(tP, 10, 0xffd166, 0.6));
+        if (xE.length) HL.push(mkLines(xE, 0x4fd8c4, 0.5), mkPts(xP, 10, 0x4fd8c4, 0.6));
+        counts = { tree: tN.length, x: xN.length };
+      }
+      const selPt = mkPts(pp, 18, 0xffffff, 1);
+      HL.push(selPt);
+      hlPulse = { mat: selPt.material, base: 18 };
+      return counts;
+    };
+
     // ── 필터/토글 ──
-    let filter = null;
     const chips = document.getElementById('gChips');
     chips.innerHTML = `<button class="g-chip on" data-l1="">전체</button>` +
       l1s.map(n => `<button class="g-chip" data-l1="${n.code}" style="--cc:#${(L1_COLOR[n.code] ?? 0xffffff).toString(16).padStart(6, '0')}">${esc(n.ko)}</button>`).join('');
@@ -186,14 +299,8 @@
       if (!b) return;
       filter = b.dataset.l1 || null;
       chips.querySelectorAll('.g-chip').forEach(x => x.classList.toggle('on', x === b));
-      for (let i = 0; i < N; i++) {
-        const on = !filter || l1Of[i] === filter;
-        const f = on ? 1 : DIM;
-        col[i * 3] = baseCol[i * 3] * f;
-        col[i * 3 + 1] = baseCol[i * 3 + 1] * f;
-        col[i * 3 + 2] = baseCol[i * 3 + 2] * f;
-      }
-      pGeo.attributes.color.needsUpdate = true;
+      clearHL();
+      recolor();
       hideCard();
     });
     const tgTree = document.getElementById('gTgTree');
@@ -223,8 +330,10 @@
         const row = taxNodes[ht[0].index];
         const n = TAX.get(row[0]);
         if (n) {
-          card.innerHTML = `<div class="g-card-k">분류 노드</div><b>${esc(n.ko)}</b>
-            <div class="g-card-m">${esc(row[0])} · 하위 포함 ${num(n.tn)}편</div>
+          const c = highlightTax(ht[0].index);
+          card.innerHTML = `<div class="g-card-k">분류 노드 — 연결 하이라이트</div><b>${esc(n.ko)}</b>
+            <div class="g-card-m">${esc(row[0])} · 하위 포함 ${num(n.tn)}편 ·
+              <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
             <a class="g-card-btn" href="#/t/${encodeURIComponent(row[0])}">분류 열기 →</a>`;
           card.hidden = false;
           return;
@@ -236,12 +345,15 @@
       if (hp.length) {
         const row = IDX[hp[0].index];
         const n = TAX.get(row[4]);
-        card.innerHTML = `<div class="g-card-k">논문</div><b>${esc(row[1])}</b>
-          <div class="g-card-m">${row[2] || '—'} · 인용 ${num(row[3])}${n ? ' · ' + esc(n.ko) : ''}</div>
+        const c = highlightPaper(hp[0].index);
+        card.innerHTML = `<div class="g-card-k">논문 — 소속 분야 연결 하이라이트</div><b>${esc(row[1])}</b>
+          <div class="g-card-m">${row[2] || '—'} · 인용 ${num(row[3])}${n ? ' · ' + esc(n.ko) : ''} ·
+            <span class="g-ct">트리 ${c.tree}</span> <span class="g-cx">크로스링크 ${c.x}</span></div>
           <a class="g-card-btn" href="#/p/${encodeURIComponent(row[0])}">상세 보기 →</a>`;
         card.hidden = false;
         return;
       }
+      clearHL();
       hideCard();
     });
 
@@ -263,6 +375,7 @@
       if (S !== me || !me.alive) return;
       me.raf = requestAnimationFrame(tick);
       controls.update();
+      if (hlPulse) hlPulse.mat.size = hlPulse.base * (1 + 0.22 * Math.sin(performance.now() * 0.005));
       renderer.render(scene, camera);
       const r = canvas.getBoundingClientRect();
       for (const { el, v } of labels) {

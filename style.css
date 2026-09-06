@@ -242,6 +242,8 @@ details.abs .body { margin-top: 6px; font-size: .82rem; color: var(--txt2); }
 .g-card b { display: block; font-size: .88rem; line-height: 1.4; margin: 2px 0 4px; }
 .g-card-k { font-size: .64rem; color: #4fd8c4; font-weight: 800; letter-spacing: .05em; }
 .g-card-m { font-size: .72rem; color: #9aa7cf; margin-bottom: 8px; }
+.g-ct { color: #ffd166; font-weight: 700; }
+.g-cx { color: #4fd8c4; font-weight: 700; }
 .g-card-btn {
   display: inline-block; padding: 8px 14px; border-radius: 10px; font-size: .78rem; font-weight: 700;
   background: linear-gradient(135deg, #7c8cff, #4fd8c4); color: #fff;
