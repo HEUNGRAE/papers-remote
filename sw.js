@@ -1,7 +1,9 @@
 /* Paper Studio Remote SW — 앱셸 precache + 데이터 runtime cache */
-const SHELL_CACHE = 'psr-shell-v1';
+const SHELL_CACHE = 'psr-shell-v2';
 const DATA_CACHE = 'psr-data-v1';
-const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'graph.js',
+  'vendor/three.min.js', 'vendor/OrbitControls.js',
+  'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL_CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -75,6 +75,7 @@ function loadIndex(onProgress) {
 window.addEventListener('hashchange', route);
 
 function route() {
+  if (window.PSRGraph) PSRGraph.unmount();
   const h = location.hash.replace(/^#\/?/, '');
   const [head, ...rest] = h.split('/');
   const arg = rest.join('/');
@@ -86,14 +87,42 @@ function route() {
   if (head === 'search') return vSearch('');
   if (head === 's') return vSearch(decodeURIComponent(arg));
   if (head === 'p') return vPaper(decodeURIComponent(arg));
+  if (head === 'g') return vGraph();
   if (head === 'about') return vAbout();
   vHome();
 }
 
 function setTab(head) {
-  const map = { '': 'home', browse: 'browse', t: 'browse', search: 'search', s: 'search', p: 'browse', about: 'about' };
+  const map = { '': 'home', browse: 'browse', t: 'browse', search: 'search', s: 'search', p: 'browse', g: 'graph', about: 'about' };
   const tab = map[head] ?? 'home';
   document.querySelectorAll('#tabbar a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
+}
+
+/* ── 3D 지식그래프 ── */
+function loadScript(src, ready) {
+  if (ready()) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error(src + ' 로드 실패'));
+    document.head.appendChild(s);
+  });
+}
+
+async function vGraph() {
+  $view.innerHTML = `<div class="boot"><div class="spinner"></div><p>3D 엔진 로딩 중…</p></div>`;
+  try {
+    await loadScript('vendor/three.min.js', () => window.THREE);
+    await loadScript('vendor/OrbitControls.js', () => window.THREE && THREE.OrbitControls);
+    await loadScript('graph.js', () => window.PSRGraph);
+  } catch (e) {
+    $view.innerHTML = `<div class="err">3D 엔진 로딩 실패<br>${esc(e.message)}</div>`;
+    return;
+  }
+  if (!location.hash.startsWith('#/g')) return;
+  $view.innerHTML = '';
+  PSRGraph.mount($view, { META, TAX, loadIndex, esc, num });
 }
 
 /* ── views ── */
@@ -113,6 +142,10 @@ function vHome() {
       <div class="stat"><b>${num(META.nodes)}</b><i>분류 노드</i></div>
       <div class="stat"><b>${META.explainer_pct}%</b><i>심층 해설</i></div>
     </div>
+    <a class="graph-banner" href="#/g">
+      <b>🌌 3D 지식그래프</b>
+      <span>93,428편 논문 은하 · 분류망 · 분야 간 크로스레퍼런스 링크</span>
+    </a>
     <div class="sec-title">대분류 탐색</div>
     <div class="l1-grid">
       ${l1s.map(c => {
